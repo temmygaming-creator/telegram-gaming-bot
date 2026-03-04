@@ -1318,7 +1318,7 @@ class CrossPlatformBot:
         self.CHANNEL_LINK = "https://t.me/temzygaming2"
         
         # ADMIN USER IDs
-        self.ADMIN_IDS = [7475473197, 7713987088]
+        self.ADMIN_IDS = [7475473197, 6590225931]
         
         # Mini-games state management
         self.guess_games = {}  # {user_id: {'target': number, 'attempts': count}}
