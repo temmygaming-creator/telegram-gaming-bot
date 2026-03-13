@@ -2440,7 +2440,7 @@ Have fun! 🎉"""
             elif data == "back_to_menu":
                 welcome_text = f"""👋 Welcome {first_name}!
 
-🤖 <b>GAMERDROID™ V1</b>
+🤖 <b>TEMZYGAMINGBOT™ V1</b>
 
 📊 Features:
 • 🎮 Game File Browser
@@ -3852,8 +3852,14 @@ You can send messages to all bot subscribers.
             }
             
             try:
-                requests.post(photo_url, data=photo_data, timeout=30)
-                return True
+                response = requests.post(photo_url, data=photo_data, timeout=30)
+                result = response.json()
+                if result.get('ok'):
+                    print(f"✅ Photo preview sent to admin {user_id}")
+                    return True
+                else:
+                    print(f"❌ Failed to send photo preview: {result.get('description')}")
+                    return False
             except Exception as e:
                 print(f"❌ Error sending photo preview: {e}")
                 return False
@@ -3863,6 +3869,7 @@ You can send messages to all bot subscribers.
     def send_broadcast_to_all_enhanced(self, user_id, chat_id):
         """Send enhanced broadcast (text or photo) to all users"""
         if user_id not in self.broadcast_sessions:
+            self.robust_send_message(chat_id, "❌ No active broadcast session.")
             return False
             
         session = self.broadcast_sessions[user_id]
@@ -3906,6 +3913,15 @@ You can send messages to all bot subscribers.
                         "parse_mode": "HTML"
                     }
                     response = requests.post(photo_url, data=photo_data, timeout=30)
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('ok'):
+                            success_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        failed_count += 1
                 else:
                     # Send text broadcast
                     response = requests.post(self.base_url + "sendMessage", data={
@@ -3913,11 +3929,15 @@ You can send messages to all bot subscribers.
                         "text": message_text,
                         "parse_mode": "HTML"
                     }, timeout=30)
-                
-                if response.json().get('ok'):
-                    success_count += 1
-                else:
-                    failed_count += 1
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('ok'):
+                            success_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        failed_count += 1
                 
                 # Update progress every 10 messages
                 if (i + 1) % 10 == 0 or (i + 1) == total_users:
@@ -6129,6 +6149,39 @@ Use this ID for admin verification if needed."""
     def process_message(self, message):
         """Main message processing function"""
         try:
+            # Check for forwarded messages first
+            if 'forward_origin' in message:
+                print(f"🔄 Forwarded message received from user {message['from']['id']}")
+                
+                # Check if it's an admin and in broadcast session
+                user_id = message['from']['id']
+                chat_id = message['chat']['id']
+                
+                if self.is_admin(user_id) and user_id in self.broadcast_sessions:
+                    session = self.broadcast_sessions[user_id]
+                    
+                    if session['stage'] == 'waiting_message_or_photo':
+                        # Handle forwarded photo
+                        if 'photo' in message:
+                            photo = message['photo'][-1]
+                            photo_file_id = photo['file_id']
+                            caption = message.get('caption', '')
+                            print(f"📸 Processing forwarded broadcast photo with caption: {caption}")
+                            return self.handle_broadcast_photo(user_id, chat_id, photo_file_id, caption)
+                        
+                        # Handle forwarded text
+                        elif 'text' in message:
+                            text = message['text']
+                            print(f"📝 Processing forwarded broadcast text: {text}")
+                            return self.handle_broadcast_message(user_id, chat_id, text)
+                
+                # Handle as regular document upload for admins
+                elif 'document' in message and self.is_admin(user_id):
+                    return self.handle_document_upload(message)
+                
+                return True
+            
+            # Regular message processing (non-forwarded)
             if 'text' in message:
                 text = message['text']
                 chat_id = message['chat']['id']
@@ -6319,12 +6372,20 @@ This service pings the bot every 4 minutes to prevent sleep on free hosting."""
             
             # Handle photo messages for broadcasts and request replies
             if 'photo' in message:
+                print(f"📸 Photo message received from user {message['from']['id']}")
+                user_id = message['from']['id']
+                chat_id = message['chat']['id']
+                
                 # Check if this is a broadcast photo
-                if user_id in self.broadcast_sessions and self.broadcast_sessions[user_id]['stage'] == 'waiting_message_or_photo':
-                    photo = message['photo'][-1]  # Get the highest resolution photo
-                    photo_file_id = photo['file_id']
-                    caption = message.get('caption', '')
-                    return self.handle_broadcast_photo(user_id, chat_id, photo_file_id, caption)
+                if user_id in self.broadcast_sessions:
+                    print(f"📸 User {user_id} is in broadcast session with stage: {self.broadcast_sessions[user_id]['stage']}")
+                    
+                    if self.broadcast_sessions[user_id]['stage'] == 'waiting_message_or_photo':
+                        photo = message['photo'][-1]  # Get the highest resolution photo
+                        photo_file_id = photo['file_id']
+                        caption = message.get('caption', '')
+                        print(f"📸 Processing broadcast photo with caption: {caption}")
+                        return self.handle_broadcast_photo(user_id, chat_id, photo_file_id, caption)
                 
                 # Check if this is a request reply photo
                 if user_id in self.reply_sessions and self.reply_sessions[user_id]['stage'] == 'waiting_photo':
@@ -6337,14 +6398,11 @@ This service pings the bot every 4 minutes to prevent sleep on free hosting."""
             if 'document' in message and self.is_admin(message['from']['id']):
                 return self.handle_document_upload(message)
             
-            # Handle forwarded messages from admins
-            if 'forward_origin' in message and self.is_admin(message['from']['id']):
-                return self.handle_forwarded_message(message)
-            
             return False
             
         except Exception as e:
             print(f"❌ Process message error: {e}")
+            traceback.print_exc()
             return False
 
     def handle_verification(self, message):
